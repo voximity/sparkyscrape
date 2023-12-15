@@ -99,6 +99,15 @@ impl LevelDifficulty {
         }
     }
 
+    pub fn directory(&self) -> &'static str {
+        match self {
+            Self::Easy => "easy",
+            Self::Medium => "medium",
+            Self::Hard => "hard",
+            Self::Legendary => "legendary",
+        }
+    }
+
     pub fn filename(&self) -> &'static str {
         match self {
             Self::Easy => "easy.bin",
