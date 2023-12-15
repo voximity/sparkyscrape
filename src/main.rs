@@ -1,6 +1,6 @@
 mod level;
 
-use std::{collections::HashMap, io::Cursor, path::Path, sync::Arc};
+use std::{collections::HashMap, io::Cursor, path::Path, sync::Arc, time::Duration};
 
 use byteorder::{ReadBytesExt, LE};
 use colored::Colorize;
@@ -41,11 +41,12 @@ struct Config {
     server_id: String,
     bot_id: String,
     channels: Vec<String>,
+    unprotected_ip: Option<String>,
 }
 
 struct ChannelState {
     url: String,
-    guess: Option<String>,
+    guess: Option<(String, f32)>,
     coefficients: Option<Coefficients>,
     difficulty: LevelDifficulty,
     guesses: HashMap<UserId, String>,
@@ -196,7 +197,7 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                     channel_prefix,
                     best_guess.difficulty.colorize(best_guess.name.as_str()),
                     dist,
-                    if dist < &1_000f32 {
+                    if dist < &500f32 {
                         " !!!".bold().bright_yellow().to_string()
                     } else {
                         "".to_string()
@@ -204,7 +205,7 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 );
 
                 state.write().await.get_mut(&ev.channel_id).unwrap().guess =
-                    Some(best_guess.name.to_string());
+                    Some((best_guess.name.to_string(), *dist));
             }
         }
 
@@ -233,22 +234,28 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                     let id: UserId =
                         UserId::new(captures.get(1).unwrap().as_str().parse().unwrap());
 
-                    if let Some(guess) = channel_state.guesses.get(&id) {
+                    if let Some(answer) = channel_state.guesses.get(&id) {
                         // our guess was correct
-                        if matches!(&channel_state.guess, Some(g) if g == &guess.to_lowercase()) {
-                            println!(
-                                "{} {} my guess was correct: {}",
-                                channel_prefix,
-                                "I was right!".bold().underline(),
-                                guess.bold().blue()
-                            );
-                            return;
+                        match &channel_state.guess {
+                            Some((my_guess, dist)) if my_guess == &answer.to_lowercase() => {
+                                println!(
+                                    "{} {} my guess was correct: {} (dist {})",
+                                    channel_prefix,
+                                    "I was right!".bold().underline(),
+                                    channel_state.difficulty.colorize(my_guess.as_str()).bold(),
+                                    dist,
+                                );
+                                return;
+                            }
+                            _ => (),
                         }
 
                         println!(
                             "{} I was wrong, winning guess: {}",
                             channel_prefix,
-                            guess.bold().blue()
+                            channel_state
+                                .difficulty
+                                .colorize(answer.to_lowercase().bold())
                         );
 
                         let level_state = {
@@ -261,7 +268,7 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                             .unwrap()
                             .read()
                             .await
-                            .get(&guess.to_lowercase())
+                            .get(&answer.to_lowercase())
                             .is_some()
                         {
                             println!("{} {}", channel_prefix, "I already knew that one!".red());
@@ -273,9 +280,9 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                             .write()
                             .await
                             .insert(
-                                guess.to_lowercase(),
+                                answer.to_lowercase(),
                                 Level {
-                                    name: guess.to_lowercase(),
+                                    name: answer.to_lowercase(),
                                     difficulty: channel_state.difficulty,
                                     coefficients: channel_state
                                         .coefficients
@@ -368,6 +375,31 @@ impl RawEventHandler for RawHandler {
 
 #[tokio::main]
 async fn main() {
+    // make sure we are on VPN
+    if let Some(ip) = &CONFIG.unprotected_ip {
+        let reqwest = reqwest::Client::new();
+        let out = reqwest
+            .get("http://v4.ident.me/")
+            .send()
+            .await
+            .expect("IPv4 from v4.ident.me")
+            .text()
+            .await
+            .expect("IPv4 from v4.ident.me");
+
+        if ip == &out {
+            println!("{} using unprotected IP! halting...", "error!".red().bold());
+            std::process::exit(1);
+        }
+    } else {
+        println!(
+            "{} unprotected_ip is not set in config! waiting 10 seconds before continuing...",
+            "warning!".yellow().bold()
+        );
+
+        tokio::time::sleep(Duration::from_secs(10)).await;
+    }
+
     let mut cache_settings = serenity::cache::Settings::default();
     cache_settings.max_messages = 200;
 
