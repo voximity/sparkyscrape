@@ -1753,6 +1753,7 @@ dependencies = [
  "http",
  "image",
  "lazy_static",
+ "rayon",
  "regex",
  "reqwest",
  "rustdct",

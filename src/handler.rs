@@ -1,9 +1,10 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, path::Path, sync::Arc};
 
 use crate::level::{Coefficients, Level};
 use bytes::Bytes;
 use colored::Colorize;
 use lazy_static::lazy_static;
+use rayon::iter::{IntoParallelRefIterator, ParallelIterator};
 use regex::Regex;
 use rustdct::{DctPlanner, TransformType2And3};
 use serde::{Deserialize, Serialize};
@@ -182,8 +183,8 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
 
             let levels = level_state.get(&difficulty).unwrap().read().await;
             let mut guesses = levels
-                .values()
-                .map(|level| (level, level.euclidean_distance_to(&coefficients)))
+                .par_iter()
+                .map(|(_, level)| (level, level.euclidean_distance_to(&coefficients)))
                 .collect::<Vec<_>>();
 
             guesses.sort_by(|(_, a), (_, b)| a.total_cmp(b));
@@ -241,9 +242,13 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                                 );
 
                                 tokio::spawn(async move {
-                                    tokio::fs::write(filename, bytes)
-                                        .await
-                                        .expect("failed to save image")
+                                    // TODO: save when we update coefficients
+                                    let path = Path::new(&filename);
+                                    if !path.exists() {
+                                        tokio::fs::write(filename, bytes)
+                                            .await
+                                            .expect("failed to save image")
+                                    }
                                 });
                             }
                             _ => (),
