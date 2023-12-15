@@ -1,15 +1,63 @@
 use byteorder::{ReadBytesExt, LE};
 use colored::Colorize;
 use image::imageops::FilterType;
-use rustdct::DctPlanner;
+use rustdct::TransformType2And3;
 use std::{
     fmt::Display,
     io::{self, Cursor, Read},
+    sync::Arc,
 };
 use tokio::io::AsyncWriteExt;
 
+pub const IMAGE_DIM: usize = 128;
 pub const NUM_COEFFICIENTS: usize = 10;
-pub type Coefficients = [f32; NUM_COEFFICIENTS];
+
+#[derive(Debug, Default, Copy, Clone)]
+pub struct Coefficients {
+    pub r: [f32; NUM_COEFFICIENTS],
+    pub g: [f32; NUM_COEFFICIENTS],
+    pub b: [f32; NUM_COEFFICIENTS],
+}
+
+fn euclidean_distance(a: &[f32; NUM_COEFFICIENTS], b: &[f32; NUM_COEFFICIENTS]) -> f32 {
+    let mut acc = 0f32;
+    for (i, (a, b)) in a.iter().zip(b).enumerate() {
+        acc += ((NUM_COEFFICIENTS - i) as f32) / (NUM_COEFFICIENTS as f32) * (a - b).powi(2)
+    }
+    acc.sqrt()
+}
+
+impl Coefficients {
+    pub fn new(data: &[u8], dct: Arc<dyn TransformType2And3<f32>>) -> anyhow::Result<Self> {
+        let img = image::io::Reader::new(Cursor::new(data))
+            .with_guessed_format()?
+            .decode()?
+            .resize_exact(IMAGE_DIM as u32, IMAGE_DIM as u32, FilterType::Triangle)
+            .into_rgb32f()
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+
+        let mut r = vec![0f32; IMAGE_DIM * IMAGE_DIM];
+        let mut g = vec![0f32; IMAGE_DIM * IMAGE_DIM];
+        let mut b = vec![0f32; IMAGE_DIM * IMAGE_DIM];
+        for (i, chunk) in img.chunks_exact(3).enumerate() {
+            r[i] = chunk[0];
+            g[i] = chunk[1];
+            b[i] = chunk[2];
+        }
+
+        dct.process_dct2(&mut r);
+        dct.process_dct2(&mut g);
+        dct.process_dct2(&mut b);
+
+        Ok(Self {
+            r: r[0..NUM_COEFFICIENTS].try_into()?,
+            g: g[0..NUM_COEFFICIENTS].try_into()?,
+            b: b[0..NUM_COEFFICIENTS].try_into()?,
+        })
+    }
+}
 
 pub struct Level {
     pub name: String,
@@ -41,24 +89,6 @@ impl Display for LevelDifficulty {
 }
 
 impl Level {
-    pub fn image_coefficients(data: &[u8]) -> anyhow::Result<Coefficients> {
-        let mut signal = image::io::Reader::new(Cursor::new(data))
-            .with_guessed_format()?
-            .decode()?
-            .resize_exact(128, 128, FilterType::Triangle)
-            .into_luma8()
-            .iter()
-            .map(|b| *b as f32)
-            .collect::<Vec<f32>>();
-
-        // TODO: reuse DCT planners
-        let mut planner = DctPlanner::new();
-        let dct = planner.plan_dct2(signal.len());
-        dct.process_dct2(&mut signal);
-
-        Ok(signal[0..NUM_COEFFICIENTS].try_into()?)
-    }
-
     pub fn read<R: Read>(reader: &mut R) -> io::Result<Self> {
         let name_len = reader.read_u8()?;
         let mut name = String::new();
@@ -74,13 +104,17 @@ impl Level {
             _ => LevelDifficulty::Easy,
         };
 
-        let mut coefficients = [0f32; NUM_COEFFICIENTS];
-        reader.read_f32_into::<LE>(&mut coefficients)?;
+        let mut r = [0f32; NUM_COEFFICIENTS];
+        let mut g = [0f32; NUM_COEFFICIENTS];
+        let mut b = [0f32; NUM_COEFFICIENTS];
+        reader.read_f32_into::<LE>(&mut r)?;
+        reader.read_f32_into::<LE>(&mut g)?;
+        reader.read_f32_into::<LE>(&mut b)?;
 
         Ok(Self {
             name,
             difficulty,
-            coefficients,
+            coefficients: Coefficients { r, g, b },
         })
     }
 
@@ -99,38 +133,27 @@ impl Level {
             })
             .await?;
 
-        for coeff in &self.coefficients {
+        for coeff in &self.coefficients.r {
+            writer.write_f32_le(*coeff).await?;
+        }
+
+        for coeff in &self.coefficients.g {
+            writer.write_f32_le(*coeff).await?;
+        }
+
+        for coeff in &self.coefficients.b {
             writer.write_f32_le(*coeff).await?;
         }
 
         Ok(())
     }
 
-    pub fn _cosine_similarity_with(&self, other: &[f32; NUM_COEFFICIENTS]) -> f32 {
-        let dot = self
-            .coefficients
-            .iter()
-            .zip(other)
-            .fold(0f32, |acc, (a, b)| acc + a * b);
-        let mag = self.coefficients.iter().map(|a| a * a).sum::<f32>().sqrt()
-            * other.iter().map(|b| b * b).sum::<f32>().sqrt();
+    pub fn euclidean_distance_to(&self, &other: &Coefficients) -> f32 {
+        let r = euclidean_distance(&self.coefficients.r, &other.r);
+        let g = euclidean_distance(&self.coefficients.g, &other.g);
+        let b = euclidean_distance(&self.coefficients.b, &other.b);
 
-        dot / mag
-    }
-
-    // pub fn euclidean_distance_to(&self, &other: &[f32; NUM_COEFFICIENTS]) -> f32 {
-    //     self.coefficients
-    //         .iter()
-    //         .zip(other)
-    //         .fold(0f32, |acc, (a, b)| acc + (a - b).powi(2))
-    //         .sqrt()
-    // }
-
-    pub fn euclidean_distance_to(&self, &other: &[f32; NUM_COEFFICIENTS]) -> f32 {
-        let mut acc = 0f32;
-        for (i, (a, b)) in self.coefficients.iter().zip(other).enumerate() {
-            acc += ((NUM_COEFFICIENTS - i) as f32) / (NUM_COEFFICIENTS as f32) * (a - b).powi(2)
-        }
-        acc.sqrt()
+        // TODO: is average the best way to do this?
+        (r + g + b) / 3f32
     }
 }

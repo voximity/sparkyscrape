@@ -7,6 +7,7 @@ use colored::Colorize;
 use lazy_static::lazy_static;
 use level::{Coefficients, Level};
 use regex::Regex;
+use rustdct::{DctPlanner, TransformType2And3};
 use serde::{Deserialize, Serialize};
 use serenity::{
     all::{ChannelId, Embed, Event, MessageUpdateEvent, UnknownEvent, UserId},
@@ -19,7 +20,7 @@ use serenity::{
 };
 use tokio::{io::AsyncWriteExt, sync::RwLock};
 
-use crate::level::LevelDifficulty;
+use crate::level::{LevelDifficulty, IMAGE_DIM};
 
 lazy_static! {
     static ref MENTION_REGEX: Regex = Regex::new(r"<@!?(\d+)>").unwrap();
@@ -30,6 +31,8 @@ lazy_static! {
         .iter()
         .map(|c| ChannelId::new(c.parse().unwrap()))
         .collect::<Vec<_>>();
+    static ref DCT_PLAN: Arc<dyn TransformType2And3<f32>> =
+        DctPlanner::new().plan_dct2(IMAGE_DIM * IMAGE_DIM);
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -156,7 +159,7 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 .unwrap();
 
             // update level coefficients
-            let coefficients = Level::image_coefficients(&bytes).unwrap();
+            let coefficients = Coefficients::new(&bytes, DCT_PLAN.clone()).unwrap();
             state
                 .write()
                 .await
