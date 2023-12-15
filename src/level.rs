@@ -1,5 +1,5 @@
 use byteorder::{ReadBytesExt, LE};
-use colored::Colorize;
+use colored::{ColoredString, Colorize};
 use image::imageops::FilterType;
 use rustdct::TransformType2And3;
 use std::{
@@ -65,7 +65,7 @@ pub struct Level {
     pub coefficients: Coefficients,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub enum LevelDifficulty {
     Easy,
     Medium,
@@ -78,13 +78,34 @@ impl Display for LevelDifficulty {
         write!(
             f,
             "{}",
-            match self {
-                Self::Easy => "Easy".bold().green(),
-                Self::Medium => "Medium".bold().yellow(),
-                Self::Hard => "Hard".bold().red(),
-                Self::Legendary => "Legendary".bold().bright_yellow(),
-            }
+            self.colorize(match self {
+                Self::Easy => "Easy",
+                Self::Medium => "Medium",
+                Self::Hard => "Hard",
+                Self::Legendary => "Legendary",
+            })
+            .bold()
         )
+    }
+}
+
+impl LevelDifficulty {
+    pub fn colorize(&self, s: impl Colorize) -> ColoredString {
+        match self {
+            Self::Easy => s.green(),
+            Self::Medium => s.yellow(),
+            Self::Hard => s.red(),
+            Self::Legendary => s.purple(),
+        }
+    }
+
+    pub fn filename(&self) -> &'static str {
+        match self {
+            Self::Easy => "easy.bin",
+            Self::Medium => "medium.bin",
+            Self::Hard => "hard.bin",
+            Self::Legendary => "legendary.bin",
+        }
     }
 }
 

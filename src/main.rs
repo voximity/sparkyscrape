@@ -58,14 +58,15 @@ impl TypeMapKey for ChannelStateData {
 
 struct LevelDatabaseData;
 impl TypeMapKey for LevelDatabaseData {
-    type Value = Arc<RwLock<HashMap<String, Level>>>;
+    type Value = Arc<HashMap<LevelDifficulty, RwLock<HashMap<String, Level>>>>;
 }
 
 async fn save_levels<'a, I: 'a + Iterator<Item = &'a Level>>(
+    difficulty: LevelDifficulty,
     num_levels: usize,
     levels: I,
 ) -> tokio::io::Result<()> {
-    let mut file = tokio::fs::File::create("db.bin").await?;
+    let mut file = tokio::fs::File::create(difficulty.filename()).await?;
     file.write_u64_le(num_levels as u64).await?;
     for level in levels {
         level.write(&mut file).await?;
@@ -76,6 +77,11 @@ async fn save_levels<'a, I: 'a + Iterator<Item = &'a Level>>(
 struct Handler;
 
 async fn handle_bot_message(ctx: Context, ev: Message) {
+    // remove bot messages
+    if ev.content.starts_with("s?") {
+        return;
+    }
+
     // we only care about channels in the registered channel list
     if !CHANNELS.contains(&ev.channel_id) {
         return;
@@ -177,10 +183,10 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 data.get::<LevelDatabaseData>().unwrap().clone()
             };
 
-            let levels = level_state.read().await;
+            let levels = level_state.get(&difficulty).unwrap().read().await;
             let mut guesses = levels
-                .iter()
-                .map(|(name, level)| (name.as_str(), level.euclidean_distance_to(&coefficients)))
+                .values()
+                .map(|level| (level, level.euclidean_distance_to(&coefficients)))
                 .collect::<Vec<_>>();
 
             guesses.sort_by(|(_, a), (_, b)| a.total_cmp(b));
@@ -188,9 +194,9 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 println!(
                     "{} my best guess is {} (dist {}{})",
                     channel_prefix,
-                    best_guess.blue(),
+                    best_guess.difficulty.colorize(best_guess.name.as_str()),
                     dist,
-                    if dist < &10_000f32 {
+                    if dist < &1_000f32 {
                         " !!!".bold().bright_yellow().to_string()
                     } else {
                         "".to_string()
@@ -198,7 +204,7 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 );
 
                 state.write().await.get_mut(&ev.channel_id).unwrap().guess =
-                    Some(best_guess.to_string());
+                    Some(best_guess.name.to_string());
             }
         }
 
@@ -251,6 +257,8 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                         };
 
                         if level_state
+                            .get(&channel_state.difficulty)
+                            .unwrap()
                             .read()
                             .await
                             .get(&guess.to_lowercase())
@@ -259,18 +267,30 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                             println!("{} {}", channel_prefix, "I already knew that one!".red());
                         }
 
-                        level_state.write().await.insert(
-                            guess.to_lowercase(),
-                            Level {
-                                name: guess.to_lowercase(),
-                                difficulty: channel_state.difficulty,
-                                coefficients: channel_state.coefficients.expect("DCT coefficients"),
-                            },
-                        );
+                        level_state
+                            .get(&channel_state.difficulty)
+                            .unwrap()
+                            .write()
+                            .await
+                            .insert(
+                                guess.to_lowercase(),
+                                Level {
+                                    name: guess.to_lowercase(),
+                                    difficulty: channel_state.difficulty,
+                                    coefficients: channel_state
+                                        .coefficients
+                                        .expect("DCT coefficients"),
+                                },
+                            );
 
                         {
-                            let levels = level_state.read().await;
-                            save_levels(levels.len(), levels.values())
+                            let levels = level_state
+                                .get(&channel_state.difficulty)
+                                .unwrap()
+                                .read()
+                                .await;
+
+                            save_levels(channel_state.difficulty, levels.len(), levels.values())
                                 .await
                                 .expect("saved levels");
                         }
@@ -364,20 +384,39 @@ async fn main() {
         data.insert::<ChannelStateData>(Arc::new(RwLock::new(HashMap::new())));
 
         // read levels
-        let mut levels = vec![];
-        if Path::new("db.bin").exists() {
-            let mut cursor = Cursor::new(tokio::fs::read("db.bin").await.unwrap());
-            let count = cursor.read_u64::<LE>().unwrap();
-            for _ in 0..count {
-                let level = Level::read(&mut cursor).unwrap();
-                levels.push((level.name.to_owned(), level));
+        let mut map = HashMap::new();
+
+        for difficulty in &[
+            LevelDifficulty::Easy,
+            LevelDifficulty::Medium,
+            LevelDifficulty::Hard,
+            LevelDifficulty::Legendary,
+        ] {
+            let mut levels = vec![];
+
+            if Path::new(difficulty.filename()).exists() {
+                let mut cursor = Cursor::new(tokio::fs::read(difficulty.filename()).await.unwrap());
+                let count = cursor.read_u64::<LE>().unwrap();
+                for _ in 0..count {
+                    let level = Level::read(&mut cursor).unwrap();
+                    if level.name.starts_with("s?") {
+                        continue;
+                    }
+
+                    levels.push((level.name.to_owned(), level));
+                }
+                println!("read in {} {} levels", levels.len(), difficulty);
+            } else {
+                println!("no {} levels", difficulty);
             }
-            println!("read in {} levels", count);
+
+            map.insert(
+                *difficulty,
+                RwLock::new(levels.into_iter().collect::<HashMap<_, _>>()),
+            );
         }
 
-        data.insert::<LevelDatabaseData>(Arc::new(RwLock::new(
-            levels.into_iter().collect::<HashMap<_, _>>(),
-        )));
+        data.insert::<LevelDatabaseData>(Arc::new(map));
     }
 
     if let Err(why) = client.start().await {
