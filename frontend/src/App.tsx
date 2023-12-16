@@ -1,4 +1,4 @@
-import { ChakraProvider } from '@chakra-ui/react';
+import { ChakraProvider, extendTheme } from '@chakra-ui/react';
 import { useEffect } from 'react';
 import { BrowserRouter, Outlet, Route, Routes } from 'react-router-dom';
 import Header from './components/Header';
@@ -16,6 +16,13 @@ import {
 import Channel from './views/Channel';
 
 export { Link as ReactRouterLink } from 'react-router-dom';
+
+const theme = extendTheme({
+  config: {
+    initialColorMode: 'dark',
+    useSystemColorMode: false,
+  },
+});
 
 const Layout = () => {
   const dispatch = useDispatch();
@@ -105,7 +112,7 @@ const Layout = () => {
 function App() {
   return (
     <Provider store={store}>
-      <ChakraProvider>
+      <ChakraProvider theme={theme}>
         <BrowserRouter>
           <Routes>
             <Route path="/" element={<Layout />}>

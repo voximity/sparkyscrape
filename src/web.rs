@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use axum::routing::get;
 use serde::Serialize;
 use serde_json::Value;
 use socketioxide::{
@@ -9,7 +8,10 @@ use socketioxide::{
 };
 use tokio::sync::mpsc;
 use tower::ServiceBuilder;
-use tower_http::{cors::CorsLayer, services::ServeDir};
+use tower_http::{
+    cors::CorsLayer,
+    services::{ServeDir, ServeFile},
+};
 
 use crate::{level::LevelDifficulty, CHANNELS};
 
@@ -83,8 +85,10 @@ pub async fn init() -> anyhow::Result<mpsc::UnboundedSender<WebMessage>> {
     });
 
     let app = axum::Router::new()
-        .route("/", get(|| async { "Hello, world!" }))
         .nest_service("/levels", ServeDir::new("levels"))
+        .nest_service("/static", ServeDir::new("frontend/build/static"))
+        .fallback_service(ServeDir::new("frontend/build"))
+        .fallback_service(ServeFile::new("frontend/build/index.html"))
         .layer(
             ServiceBuilder::new()
                 .layer(CorsLayer::permissive())
