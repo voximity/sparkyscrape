@@ -4,8 +4,11 @@ use image::imageops::FilterType;
 use rustdct::TransformType2And3;
 use serde::Serialize;
 use std::{
+    collections::HashMap,
     fmt::Display,
     io::{self, Cursor, Read},
+    path::Path,
+    str::FromStr,
     sync::Arc,
 };
 use tokio::io::AsyncWriteExt;
@@ -88,6 +91,20 @@ impl Serialize for LevelDifficulty {
     }
 }
 
+impl FromStr for LevelDifficulty {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s {
+            "easy" => Self::Easy,
+            "medium" => Self::Medium,
+            "hard" => Self::Hard,
+            "legendary" => Self::Legendary,
+            _ => return Err(()),
+        })
+    }
+}
+
 impl Display for LevelDifficulty {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
@@ -131,6 +148,31 @@ impl LevelDifficulty {
             Self::Legendary => "legendary.bin",
         }
     }
+}
+
+pub async fn read_levels(difficulty: LevelDifficulty) -> HashMap<String, Level> {
+    // create image difficulty folders
+    tokio::fs::create_dir_all(format!("levels/{}", difficulty.directory()))
+        .await
+        .unwrap();
+
+    let mut levels = vec![];
+
+    if Path::new(difficulty.filename()).exists() {
+        let mut cursor = Cursor::new(tokio::fs::read(difficulty.filename()).await.unwrap());
+        let count = cursor.read_u64::<LE>().unwrap();
+        for _ in 0..count {
+            let level = Level::read(&mut cursor).unwrap();
+            if level.name.starts_with("s?") {
+                continue;
+            }
+
+            levels.push((level.name.to_owned(), level));
+        }
+        println!("read in {} {} levels", levels.len(), difficulty);
+    }
+
+    levels.into_iter().collect::<HashMap<_, _>>()
 }
 
 impl Level {
