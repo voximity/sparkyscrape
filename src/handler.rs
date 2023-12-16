@@ -1,6 +1,10 @@
 use std::{collections::HashMap, path::Path, sync::Arc};
 
-use crate::level::{Coefficients, Level};
+use crate::{
+    level::{Coefficients, Level},
+    web::WebMessage,
+    WebMessageTxData,
+};
 use bytes::Bytes;
 use colored::Colorize;
 use lazy_static::lazy_static;
@@ -72,6 +76,17 @@ pub async fn save_levels<'a, I: 'a + Iterator<Item = &'a Level>>(
 }
 
 pub struct Handler;
+
+async fn send_web_message(ctx: &Context, message: WebMessage) {
+    ctx.data
+        .read()
+        .await
+        .get::<WebMessageTxData>()
+        .unwrap()
+        .clone()
+        .send(message)
+        .unwrap();
+}
 
 async fn handle_bot_message(ctx: Context, ev: Message) {
     // remove bot messages
@@ -152,6 +167,16 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
             );
             println!("{} new {} level", channel_prefix, difficulty);
 
+            // send web message
+            send_web_message(
+                &ctx,
+                WebMessage::GuessStart {
+                    channel_id: ev.channel_id.to_string(),
+                    difficulty,
+                },
+            )
+            .await;
+
             let reqwest = reqwest::Client::new();
             let bytes = reqwest
                 .get(&image.url)
@@ -168,14 +193,10 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 let mut channels = state.write().await;
                 let channel_state = channels.get_mut(&ev.channel_id).unwrap();
                 channel_state.coefficients = Some(coefficients);
-                channel_state.bytes = Some(bytes);
+                channel_state.bytes = Some(bytes.clone());
             }
 
             // get our best guess
-
-            // TODO: guesses should internally be categorized by difficulty
-            // TODO: so that easy guesses are not checked with medium guesses
-
             let level_state = {
                 let data = ctx.data.read().await;
                 data.get::<LevelDatabaseData>().unwrap().clone()
@@ -204,6 +225,29 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                 state.write().await.get_mut(&ev.channel_id).unwrap().guess =
                     Some((best_guess.name.to_string(), *dist));
             }
+
+            // save active image
+            let filename = format!("levels/{}.png", ev.channel_id);
+
+            tokio::spawn(async move {
+                let path = Path::new(&filename);
+                tokio::fs::write(path, bytes)
+                    .await
+                    .expect("failed to save image")
+            });
+
+            // send web message with guess
+            send_web_message(
+                &ctx,
+                WebMessage::GuessData {
+                    channel_id: ev.channel_id.to_string(),
+                    guess: guesses
+                        .iter()
+                        .map(|(level, dist)| (level.name.to_owned(), *dist))
+                        .next(),
+                },
+            )
+            .await;
         }
 
         Some(Embed {
@@ -233,25 +277,22 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
 
                     if let Some(answer) = channel_state.guesses.get(&id) {
                         // save the image in another thread if we don't already have it
-                        match channel_state.bytes {
-                            Some(bytes) if CONFIG.save_images => {
-                                let filename = format!(
-                                    "images/{}/{}.png",
-                                    channel_state.difficulty.directory(),
-                                    answer.to_lowercase()
-                                );
+                        if let Some(bytes) = channel_state.bytes {
+                            let filename = format!(
+                                "levels/{}/{}.png",
+                                channel_state.difficulty.directory(),
+                                answer.to_lowercase()
+                            );
 
-                                tokio::spawn(async move {
-                                    // TODO: save when we update coefficients
-                                    let path = Path::new(&filename);
-                                    if !path.exists() {
-                                        tokio::fs::write(filename, bytes)
-                                            .await
-                                            .expect("failed to save image")
-                                    }
-                                });
-                            }
-                            _ => (),
+                            tokio::spawn(async move {
+                                // TODO: save when we update coefficients
+                                let path = Path::new(&filename);
+                                if !path.exists() {
+                                    tokio::fs::write(path, bytes)
+                                        .await
+                                        .expect("failed to save image")
+                                }
+                            });
                         }
 
                         // check if our guess was correct
@@ -264,6 +305,17 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                                     channel_state.difficulty.colorize(my_guess.as_str()).bold(),
                                     dist,
                                 );
+
+                                send_web_message(
+                                    &ctx,
+                                    WebMessage::GuessWin {
+                                        channel_id: ev.channel_id.to_string(),
+                                        answer: my_guess.to_string(),
+                                        incorrect: false,
+                                    },
+                                )
+                                .await;
+
                                 return;
                             }
                             _ => (),
@@ -284,16 +336,17 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
 
                         // leave a message if we already knew the winning level
                         // (something probably went wrong, update DCT coefficients?)
-                        if level_state
+                        let incorrect = level_state
                             .get(&channel_state.difficulty)
                             .unwrap()
                             .read()
                             .await
                             .get(&answer.to_lowercase())
-                            .is_some()
-                        {
+                            .is_some();
+
+                        if incorrect {
                             println!("{} {}", channel_prefix, "I already knew that one!".red());
-                        }
+                        };
 
                         // insert the new level into the database
                         level_state
@@ -311,6 +364,17 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                                         .expect("DCT coefficients"),
                                 },
                             );
+
+                        // notify web of result
+                        send_web_message(
+                            &ctx,
+                            WebMessage::GuessWin {
+                                channel_id: ev.channel_id.to_string(),
+                                answer: answer.to_lowercase(),
+                                incorrect,
+                            },
+                        )
+                        .await;
 
                         // save levels to file
                         {
@@ -338,6 +402,14 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
             };
 
             state.write().await.remove(&ev.channel_id);
+
+            send_web_message(
+                &ctx,
+                WebMessage::GuessTimeout {
+                    channel_id: ev.channel_id.to_string(),
+                },
+            )
+            .await;
         }
 
         _ => (),

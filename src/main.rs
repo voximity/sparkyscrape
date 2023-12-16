@@ -1,5 +1,6 @@
 mod handler;
 mod level;
+mod web;
 
 use std::{collections::HashMap, io::Cursor, path::Path, sync::Arc, time::Duration};
 
@@ -9,8 +10,8 @@ use handler::{ChannelStateData, Handler, LevelDatabaseData, RawHandler};
 use lazy_static::lazy_static;
 use level::Level;
 use serde::{Deserialize, Serialize};
-use serenity::{all::ChannelId, Client};
-use tokio::sync::RwLock;
+use serenity::{all::ChannelId, prelude::TypeMapKey, Client};
+use tokio::sync::{mpsc, RwLock};
 
 use crate::level::LevelDifficulty;
 
@@ -31,9 +32,11 @@ pub struct Config {
     pub bot_id: String,
     pub channels: Vec<String>,
     pub unprotected_ip: Option<String>,
+}
 
-    #[serde(default)]
-    pub save_images: bool,
+pub struct WebMessageTxData;
+impl TypeMapKey for WebMessageTxData {
+    type Value = Arc<mpsc::UnboundedSender<web::WebMessage>>;
 }
 
 #[tokio::main]
@@ -63,6 +66,9 @@ async fn main() {
         tokio::time::sleep(Duration::from_secs(10)).await;
     }
 
+    // start the web app
+    let web_tx = web::init().await.unwrap();
+
     let mut cache_settings = serenity::cache::Settings::default();
     cache_settings.max_messages = 200;
 
@@ -77,6 +83,7 @@ async fn main() {
     {
         let mut data = client.data.write().await;
         data.insert::<ChannelStateData>(Arc::new(RwLock::new(HashMap::new())));
+        data.insert::<WebMessageTxData>(Arc::new(web_tx));
 
         // read levels
         let mut map = HashMap::new();
@@ -88,11 +95,9 @@ async fn main() {
             LevelDifficulty::Legendary,
         ] {
             // create image difficulty folders
-            if CONFIG.save_images {
-                tokio::fs::create_dir_all(format!("images/{}", difficulty.directory()))
-                    .await
-                    .unwrap();
-            }
+            tokio::fs::create_dir_all(format!("levels/{}", difficulty.directory()))
+                .await
+                .unwrap();
 
             let mut levels = vec![];
 

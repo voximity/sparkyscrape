@@ -2,6 +2,7 @@ use byteorder::{ReadBytesExt, LE};
 use colored::{ColoredString, Colorize};
 use image::imageops::FilterType;
 use rustdct::TransformType2And3;
+use serde::Serialize;
 use std::{
     fmt::Display,
     io::{self, Cursor, Read},
@@ -71,6 +72,20 @@ pub enum LevelDifficulty {
     Medium,
     Hard,
     Legendary,
+}
+
+impl Serialize for LevelDifficulty {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        serializer.serialize_i32(match self {
+            Self::Easy => 0,
+            Self::Medium => 1,
+            Self::Hard => 2,
+            Self::Legendary => 3,
+        })
+    }
 }
 
 impl Display for LevelDifficulty {
