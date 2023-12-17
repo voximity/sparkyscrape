@@ -191,9 +191,15 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
             let coefficients = Coefficients::new(&bytes, DCT_PLAN.clone()).unwrap();
             {
                 let mut channels = state.write().await;
-                let channel_state = channels.get_mut(&ev.channel_id).unwrap();
-                channel_state.coefficients = Some(coefficients);
-                channel_state.bytes = Some(bytes.clone());
+                match channels.get_mut(&ev.channel_id) {
+                    Some(state) if state.url == image.url => {
+                        state.coefficients = Some(coefficients);
+                        state.bytes = Some(bytes.to_owned());
+                    }
+                    _ => {
+                        return;
+                    }
+                }
             }
 
             // get our best guess
@@ -210,6 +216,16 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
 
             guesses.sort_by(|(_, a), (_, b)| a.total_cmp(b));
             if let Some((best_guess, dist)) = guesses.first() {
+                // update state, return if state has changed to a new URL
+                match state.write().await.get_mut(&ev.channel_id) {
+                    Some(state) if state.url == image.url => {
+                        state.guess = Some((best_guess.name.to_string(), *dist));
+                    }
+                    _ => {
+                        return;
+                    }
+                }
+
                 println!(
                     "{} my best guess is {} (dist {}{})",
                     channel_prefix,
@@ -221,9 +237,6 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
                         "".to_string()
                     }
                 );
-
-                state.write().await.get_mut(&ev.channel_id).unwrap().guess =
-                    Some((best_guess.name.to_string(), *dist));
             }
 
             // save active image
@@ -255,7 +268,6 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
             description: Some(desc),
             ..
         }) if title == "Congratulations! You guessed the Level correctly!" => {
-            // TODO: determine who wins
             let state = {
                 let data = ctx.data.read().await;
                 data.get::<ChannelStateData>().unwrap().clone()

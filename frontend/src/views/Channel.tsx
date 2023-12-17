@@ -129,7 +129,7 @@ const Channel = () => {
             </GridItem>
             <GridItem display="flex" justifyContent="center">
               {guess ? (
-                <LevelName name={guess} />
+                <LevelName name={guess} copyable />
               ) : (
                 <Text>No guess available</Text>
               )}
