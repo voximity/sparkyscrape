@@ -33,7 +33,6 @@ const Guess = () => {
       setFile(f);
       const reader = new FileReader();
       reader.onload = (ev) => {
-        console.log(ev.target?.result);
         setImageData(ev.target!.result as string);
       };
       reader.readAsDataURL(f);
@@ -61,7 +60,7 @@ const Guess = () => {
   };
 
   return (
-    <Container maxW="container.md" my="3">
+    <Container maxW="container.lg" my="3">
       <Stack spacing="3">
         <Heading>Guess</Heading>
         <FormControl>
