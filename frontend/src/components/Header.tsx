@@ -14,6 +14,9 @@ const Header = () => {
           <Link as={ReactRouterLink} to="/">
             <Heading size="lg">sparkyscrape</Heading>
           </Link>
+          <Link as={ReactRouterLink} to="guess" fontWeight="bold">
+            Guess
+          </Link>
           {Object.entries(channels).map(([id, channel]) => (
             <Link
               key={id}

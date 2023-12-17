@@ -163,8 +163,28 @@ async fn main() {
         }
     }
 
+    // read levels in
+    let db = {
+        let mut map = HashMap::new();
+
+        for difficulty in &[
+            LevelDifficulty::Easy,
+            LevelDifficulty::Medium,
+            LevelDifficulty::Hard,
+            LevelDifficulty::Legendary,
+        ] {
+            map.insert(*difficulty, RwLock::new(read_levels(*difficulty).await));
+        }
+
+        Arc::new(map)
+    };
+
     // start the web app
-    let web_tx = web::init().await.unwrap();
+    let web_tx = web::init(web::Init {
+        database: Arc::clone(&db),
+    })
+    .await
+    .unwrap();
 
     let mut cache_settings = serenity::cache::Settings::default();
     cache_settings.max_messages = 200;
@@ -181,20 +201,7 @@ async fn main() {
         let mut data = client.data.write().await;
         data.insert::<ChannelStateData>(Arc::new(RwLock::new(HashMap::new())));
         data.insert::<WebMessageTxData>(Arc::new(web_tx));
-
-        // read levels
-        let mut map = HashMap::new();
-
-        for difficulty in &[
-            LevelDifficulty::Easy,
-            LevelDifficulty::Medium,
-            LevelDifficulty::Hard,
-            LevelDifficulty::Legendary,
-        ] {
-            map.insert(*difficulty, RwLock::new(read_levels(*difficulty).await));
-        }
-
-        data.insert::<LevelDatabaseData>(Arc::new(map));
+        data.insert::<LevelDatabaseData>(db);
     }
 
     if let Err(why) = client.start().await {

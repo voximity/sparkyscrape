@@ -6,7 +6,7 @@ import {
 } from '@reduxjs/toolkit';
 import channels from './channels';
 
-const DIFFICULTY_STRINGS = ['easy', 'medium', 'hard', 'legendary'];
+export const DIFFICULTY_STRINGS = ['easy', 'medium', 'hard', 'legendary'];
 export function getDifficultyString(difficulty: number): string {
   return DIFFICULTY_STRINGS[difficulty] ?? 'easy';
 }

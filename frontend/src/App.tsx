@@ -14,6 +14,7 @@ import {
   setChannelGameWin,
 } from './api/channels';
 import Channel from './views/Channel';
+import Guess from './views/Guess';
 
 export { Link as ReactRouterLink } from 'react-router-dom';
 
@@ -118,6 +119,7 @@ function App() {
             <Route path="/" element={<Layout />}>
               <Route index element={<Home />} />
               <Route path="channel/:id" element={<Channel />} />
+              <Route path="guess" element={<Guess />} />
             </Route>
           </Routes>
         </BrowserRouter>

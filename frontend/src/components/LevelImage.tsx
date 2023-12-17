@@ -1,21 +1,26 @@
 import { Box, Image } from '@chakra-ui/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { getDifficultyString } from '../api/store';
 
 const LevelImage = ({
   difficulty,
+  src,
   current,
   name,
   fallback,
   message,
 }: {
-  difficulty: number;
+  difficulty?: number;
+  src?: string;
   current?: string;
   name?: string;
   fallback?: boolean;
   message: string;
 }) => {
   const [errored, setErrored] = useState(false);
+  useEffect(() => {
+    setErrored(false);
+  }, [src, current, name]);
 
   const box = (
     <Box
@@ -30,16 +35,17 @@ const LevelImage = ({
     </Box>
   );
 
-  if (errored || fallback || (!name && !current)) return box;
+  if (errored || fallback || (!src && !name && !current)) return box;
 
   return (
     <Image
       src={
-        current
+        src ??
+        (current
           ? `/levels/${current}.png?d=${Date.now()}`
-          : `/levels/${getDifficultyString(difficulty)}/${encodeURIComponent(
+          : `/levels/${getDifficultyString(difficulty!)}/${encodeURIComponent(
               name ?? ''
-            )}.png`
+            )}.png`)
       }
       borderRadius="md"
       ignoreFallback

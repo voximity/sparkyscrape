@@ -29,7 +29,7 @@ use crate::{
 
 lazy_static! {
     static ref MENTION_REGEX: Regex = Regex::new(r"<@!?(\d+)>").unwrap();
-    static ref DCT_PLAN: Arc<dyn TransformType2And3<f32>> =
+    pub static ref DCT_PLAN: Arc<dyn TransformType2And3<f32>> =
         DctPlanner::new().plan_dct2(IMAGE_DIM * IMAGE_DIM);
 }
 
@@ -57,9 +57,10 @@ impl TypeMapKey for ChannelStateData {
     type Value = Arc<RwLock<HashMap<ChannelId, ChannelState>>>;
 }
 
+pub type LevelDatabase = Arc<HashMap<LevelDifficulty, RwLock<HashMap<String, Level>>>>;
 pub struct LevelDatabaseData;
 impl TypeMapKey for LevelDatabaseData {
-    type Value = Arc<HashMap<LevelDifficulty, RwLock<HashMap<String, Level>>>>;
+    type Value = LevelDatabase;
 }
 
 pub async fn save_levels<'a, I: 'a + Iterator<Item = &'a Level>>(
@@ -106,8 +107,15 @@ async fn handle_bot_message(ctx: Context, ev: Message) {
             data.get::<ChannelStateData>().unwrap().clone()
         };
 
+        // remove mentions, trim, lowercase guesses
         if let Some(state) = state.write().await.get_mut(&ev.channel_id) {
-            state.guesses.insert(ev.author.id, ev.content.to_owned());
+            state.guesses.insert(
+                ev.author.id,
+                MENTION_REGEX
+                    .replace_all(&ev.content, "")
+                    .trim()
+                    .to_lowercase(),
+            );
         }
 
         return;
