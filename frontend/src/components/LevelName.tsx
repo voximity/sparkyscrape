@@ -14,7 +14,7 @@ const LevelName = ({
   copyable?: boolean;
 }) => {
   const [copied, setCopied] = useState(false);
-  const timeout = useRef<NodeJS.Timeout>();
+  const timeout = useRef<number>();
   const copy = () => {
     navigator.clipboard.writeText(name);
     setCopied(true);

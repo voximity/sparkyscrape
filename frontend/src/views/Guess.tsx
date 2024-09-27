@@ -22,7 +22,7 @@ import LevelName from '../components/LevelName';
 
 const Guess = () => {
   const [loading, setLoading] = useState(false);
-  const [difficulty, setDifficulty] = useState('1');
+  const [difficulty, setDifficulty] = useState('0');
   const [guess, setGuess] = useState<{ level: string; distance: number }>();
   const [file, setFile] = useState<File | null>();
   const [imageData, setImageData] = useState('');

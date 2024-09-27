@@ -28,7 +28,7 @@ use crate::{
 };
 
 lazy_static! {
-    static ref MENTION_REGEX: Regex = Regex::new(r"<@!?(\d+)>").unwrap();
+    pub static ref MENTION_REGEX: Regex = Regex::new(r"<@!?(\d+)>").unwrap();
     pub static ref DCT_PLAN: Arc<dyn TransformType2And3<f32>> =
         DctPlanner::new().plan_dct2(IMAGE_DIM * IMAGE_DIM);
 }

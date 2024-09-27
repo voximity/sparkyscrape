@@ -13,6 +13,8 @@ use std::{
 };
 use tokio::io::AsyncWriteExt;
 
+use crate::handler::MENTION_REGEX;
+
 pub const IMAGE_DIM: usize = 128;
 pub const NUM_COEFFICIENTS: usize = 10;
 
@@ -163,7 +165,7 @@ pub async fn read_levels(difficulty: LevelDifficulty) -> HashMap<String, Level> 
         let count = cursor.read_u64::<LE>().unwrap();
         for _ in 0..count {
             let level = Level::read(&mut cursor).unwrap();
-            if level.name.starts_with("s?") {
+            if level.name.starts_with("s?") || MENTION_REGEX.is_match(&level.name) {
                 continue;
             }
 
